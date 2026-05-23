@@ -100,6 +100,8 @@ type
     posHistoryCount: int
     stuckCount: int
     lastSentNonZero: bool
+    lastAdjacentPreyId: int
+    adjacentWaitTicks: int
 
 proc readU16(blob: string, offset: int): int =
   int(uint16(blob[offset].uint8) or
@@ -322,28 +324,103 @@ proc pickExploreTarget(bot: var Bot) =
   else: discard
   bot.exploreTargetAge = 0
 
-proc findStag(prey: openArray[PreySight]): PreySight =
-  for p in prey:
-    if p.kind == Stag:
-      return p
-  PreySight()
+proc chebyshev(ax, ay, bx, by: int): int =
+  max(abs(ax - bx), abs(ay - by))
 
-proc pickClearCardinalNeighbor(
-  map: ObstacleMap, preyX, preyY: int
+proc chooseStag(
+  selfX, selfY: int,
+  prey: openArray[PreySight],
+  players: openArray[PlayerSight],
+  selfObjectId: int
+): PreySight =
+  ## Picks a stag to pursue, distributing hunters across stags when many
+  ## are visible. A stag with two allies already adjacent is treated as
+  ## "going to be captured by them" — we look elsewhere. A stag with one
+  ## ally adjacent gets a cooperation bonus. Otherwise we discount stags
+  ## that allies are closer to than we are, so two hunters near the same
+  ## cluster of stags tend to split. Deterministic objectId tiebreak so
+  ## independent hunters with the same view make the same choice.
+  var bestCost = high(int)
+  for p in prey:
+    if p.kind != Stag:
+      continue
+    let myDist = chebyshev(selfX, selfY, p.tileX, p.tileY)
+    var alliesCloser = 0
+    var alliesAdjacent = 0
+    for pl in players:
+      if pl.objectId == selfObjectId: continue
+      let allyDist = chebyshev(pl.tileX, pl.tileY, p.tileX, p.tileY)
+      if allyDist < myDist: inc alliesCloser
+      if allyDist == 1: inc alliesAdjacent
+    if alliesAdjacent >= 2:
+      continue  # stag is already being captured by others
+    let
+      cooperationBonus = (if alliesAdjacent == 1: -8 else: 0)
+      # One ally closer means we form a pair — no penalty. 2+ means we'd be
+      # the 3rd hunter on this stag, which jams the others. Bump the cost.
+      crowdingPenalty = max(0, alliesCloser - 1) * 6
+      cost = myDist + crowdingPenalty + cooperationBonus
+    if cost < bestCost or
+        (cost == bestCost and result.found and p.objectId < result.objectId):
+      bestCost = cost
+      result = p
+
+type
+  OccupiedSides = object
+    n, s, e, w: bool
+
+proc occupiedSidesOf(
+  preyX, preyY: int,
+  players: openArray[PlayerSight]
+): OccupiedSides =
+  for player in players:
+    if player.tileX == preyX and player.tileY == preyY - 1:
+      result.n = true
+    elif player.tileX == preyX and player.tileY == preyY + 1:
+      result.s = true
+    elif player.tileX == preyX + 1 and player.tileY == preyY:
+      result.e = true
+    elif player.tileX == preyX - 1 and player.tileY == preyY:
+      result.w = true
+
+proc bestStagSide(
+  selfX, selfY, preyX, preyY: int,
+  players: openArray[PlayerSight]
 ): tuple[x, y: int, found: bool] =
-  const offsets = [(0, -1), (0, 1), (-1, 0), (1, 0)]
-  var candidates: array[4, tuple[x, y: int]]
-  var count = 0
-  for off in offsets:
-    let nx = preyX + off[0]
-    let ny = preyY + off[1]
-    if inBounds(nx, ny) and map.getTile(nx, ny) != TileBlocked:
-      candidates[count] = (nx, ny)
-      inc count
-  if count == 0:
-    return (0, 0, false)
-  let pick = candidates[rand(count - 1)]
-  (pick.x, pick.y, true)
+  ## For a stag, picks the side that pairs with whoever (self or ally) is
+  ## already adjacent on the opposite axis. If no side is occupied yet,
+  ## picks a deterministic side from the stag's tile parity so two
+  ## independent stag_hunters tend to take complementary sides.
+  let sides = occupiedSidesOf(preyX, preyY, players)
+  let selfIsN = (selfX == preyX and selfY == preyY - 1)
+  let selfIsS = (selfX == preyX and selfY == preyY + 1)
+  let selfIsE = (selfX == preyX + 1 and selfY == preyY)
+  let selfIsW = (selfX == preyX - 1 and selfY == preyY)
+
+  if sides.n and not sides.s and not selfIsN:
+    return (preyX, preyY + 1, true)
+  if sides.s and not sides.n and not selfIsS:
+    return (preyX, preyY - 1, true)
+  if sides.e and not sides.w and not selfIsE:
+    return (preyX - 1, preyY, true)
+  if sides.w and not sides.e and not selfIsW:
+    return (preyX + 1, preyY, true)
+  if selfIsN and not sides.s:
+    return (preyX, preyY + 1, true)
+  if selfIsS and not sides.n:
+    return (preyX, preyY - 1, true)
+  if selfIsE and not sides.w:
+    return (preyX - 1, preyY, true)
+  if selfIsW and not sides.e:
+    return (preyX + 1, preyY, true)
+
+  # Nothing claimed yet — bias by tile parity so two stag_hunters seeing
+  # the same stag without coordination converge on the same axis.
+  let vertical = ((preyX + preyY) and 1) == 0
+  if vertical:
+    return (preyX, preyY - 1, true)
+  else:
+    return (preyX + 1, preyY, true)
 
 proc findKillSpot(bot: Bot): tuple[x, y: int, found: bool] =
   ## Scan for 1-dot indicator adjacent to self — stepping there completes a capture.
@@ -386,26 +463,81 @@ proc decideMask(bot: var Bot): uint8 =
     return bot.navigate(killSpot.x, killSpot.y)
 
   let prey = bot.visiblePrey()
-  let stag = findStag(prey)
+  let stag = chooseStag(bot.selfTileX, bot.selfTileY, prey, players, bot.selfObjectId)
 
-  # Hunt mode: stag visible — go to a random clear side of it
+  # Hunt mode: stag visible — coordinate with allies via opposing sides
   if stag.found:
     bot.mode = ModeHunt
 
-    # Already on a cardinal neighbor of the stag — hold position
-    let dx = abs(bot.selfTileX - stag.tileX)
-    let dy = abs(bot.selfTileY - stag.tileY)
-    if (dx == 1 and dy == 0) or (dx == 0 and dy == 1):
+    let
+      dx = abs(bot.selfTileX - stag.tileX)
+      dy = abs(bot.selfTileY - stag.tileY)
+      adjacent = (dx == 1 and dy == 0) or (dx == 0 and dy == 1)
+
+    if adjacent:
+      # If our current side is half of a winning pair, hold. Otherwise,
+      # after a short wait, slide to the opposite side ourselves so a lone
+      # stag_hunter that grabbed the wrong side doesn't starve waiting.
+      if bot.lastAdjacentPreyId == stag.objectId:
+        inc bot.adjacentWaitTicks
+      else:
+        bot.lastAdjacentPreyId = stag.objectId
+        bot.adjacentWaitTicks = 1
+
+      let sides = occupiedSidesOf(stag.tileX, stag.tileY, players)
+      let selfIsN = (bot.selfTileX == stag.tileX and bot.selfTileY == stag.tileY - 1)
+      let selfIsS = (bot.selfTileX == stag.tileX and bot.selfTileY == stag.tileY + 1)
+      let selfIsE = (bot.selfTileX == stag.tileX + 1 and bot.selfTileY == stag.tileY)
+      let selfIsW = (bot.selfTileX == stag.tileX - 1 and bot.selfTileY == stag.tileY)
+      let partneredOpposite =
+        (selfIsN and sides.s) or (selfIsS and sides.n) or
+        (selfIsE and sides.w) or (selfIsW and sides.e)
+
+      if partneredOpposite:
+        bot.updateStuckState(0)
+        return 0
+
+      if bot.adjacentWaitTicks >= 18:
+        let side = bestStagSide(
+          bot.selfTileX, bot.selfTileY, stag.tileX, stag.tileY, players
+        )
+        if side.found and not (bot.selfTileX == side.x and bot.selfTileY == side.y):
+          return bot.navigate(side.x, side.y)
+
       bot.updateStuckState(0)
       return 0
 
-    let spot = pickClearCardinalNeighbor(bot.obstacleMap, stag.tileX, stag.tileY)
-    if spot.found:
-      return bot.navigate(spot.x, spot.y)
+    bot.adjacentWaitTicks = 0
+    bot.lastAdjacentPreyId = -1
+
+    let side = bestStagSide(
+      bot.selfTileX, bot.selfTileY, stag.tileX, stag.tileY, players
+    )
+    if side.found:
+      return bot.navigate(side.x, side.y)
     return bot.navigate(stag.tileX, stag.tileY)
 
-  # Explore mode: patrol quadrants to find a stag
+  # No stag visible. A lone stag_hunter cannot capture anything, so the
+  # explore step doubles as "make sure I'm not too far from an ally — when
+  # a stag appears I want a partner already nearby."
   bot.mode = ModeExplore
+  bot.adjacentWaitTicks = 0
+  bot.lastAdjacentPreyId = -1
+
+  # If we can see an ally that's more than 3 tiles away, close the gap a
+  # bit. Tile 3 keeps room for both to move toward a freshly-visible stag
+  # without piling on the same tile.
+  var nearestAlly: PlayerSight
+  var nearestAllyDist = high(int)
+  for pl in players:
+    if pl.objectId == bot.selfObjectId: continue
+    let d = chebyshev(bot.selfTileX, bot.selfTileY, pl.tileX, pl.tileY)
+    if d < nearestAllyDist:
+      nearestAllyDist = d
+      nearestAlly = pl
+  if nearestAlly.found and nearestAllyDist > 3:
+    return bot.navigate(nearestAlly.tileX, nearestAlly.tileY)
+
   inc bot.exploreTargetAge
   let atTarget = (bot.selfTileX == bot.exploreTargetX and
                   bot.selfTileY == bot.exploreTargetY)
@@ -466,6 +598,8 @@ proc initBot(): Bot =
   result.posHistoryCount = 0
   result.stuckCount = 0
   result.lastSentNonZero = false
+  result.lastAdjacentPreyId = -1
+  result.adjacentWaitTicks = 0
 
 proc acceptServerMessage(ws: WebSocket, message: Message, bot: var Bot): bool =
   case message.kind
