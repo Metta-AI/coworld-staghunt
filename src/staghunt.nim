@@ -234,6 +234,35 @@ const
 
 var appState: WebSocketAppState
 
+# Event log (JSONL). Each line: {"t": tick, "ev": name, ...}.
+# Written from the main sim loop only — no locking required.
+var eventLogFile: File
+var eventLogActive = false
+
+proc openEventLog(path: string) =
+  if path.len == 0: return
+  try:
+    eventLogFile = open(path, fmWrite)
+    eventLogActive = true
+  except IOError as e:
+    echo "ERROR: failed to open event log ", path, ": ", e.msg
+
+proc closeEventLog() =
+  if eventLogActive:
+    eventLogFile.close()
+    eventLogActive = false
+
+proc logEvent(tick: int, name: string, fields: JsonNode) =
+  if not eventLogActive: return
+  var obj = %*{"t": tick, "ev": name}
+  for k, v in fields.pairs:
+    obj[k] = v
+  try:
+    eventLogFile.writeLine($obj)
+    eventLogFile.flushFile()
+  except IOError:
+    eventLogActive = false
+
 proc defaultGameConfig(): GameConfig =
   GameConfig(
     tokens: @[],
@@ -281,7 +310,10 @@ proc parseGameConfig(jsonStr: string): GameConfig =
 proc repoDir(): string = getCurrentDir() / ".."
 proc clientDataDir(): string = repoDir() / "clients" / "data"
 proc palettePath(): string = clientDataDir() / "pallete.png"
-proc spriteDir(): string = getCurrentDir() / "stag_hunt" / "sprites" / "12px"
+proc spriteDir(): string =
+  let local = getCurrentDir() / "sprites" / "12px"
+  if dirExists(local): local
+  else: getCurrentDir() / "stag_hunt" / "sprites" / "12px"
 
 proc tileIndex(tx, ty: int): int = ty * WorldWidthTiles + tx
 
@@ -410,172 +442,6 @@ proc patternToRgbaSprite(
 # ---------------------------------------------------------------------------
 
 const
-  # Character sprite sizes form a hierarchy: rabbit smaller than the tile
-  # (and jiggles inside it), boar/stag tile-sized, moose and elephant
-  # overlap neighboring tiles. Mechanically every prey still occupies
-  # exactly one tile.
-
-  # Player: 12x12 (tile-sized), outlined. Faces down by default; sprite is
-  # rotated for other facings. Symmetric left/right.
-  PlayerPattern = @[
-    "............",
-    "....0000....",
-    "...0QQQQ0...",
-    "..0QQQQQQ0..",
-    "..0Q4444Q0..",
-    "..0Q4004Q0..",
-    "..0Q4444Q0..",
-    "...044440...",
-    "..0PPPPPP0..",
-    ".0PPPPPPPP0.",
-    ".0P0PPPP0P0.",
-    "...00..00...",
-  ]
-
-  # Rabbit: 10x10, white body with long pink-inner ears and a dark eye.
-  RabbitPattern = @[
-    ".00....00.",
-    "0220.0220.",
-    "0240.0240.",
-    "0220.0220.",
-    "0220022200",
-    "022222220.",
-    "02002222.0",
-    ".0222220..",
-    "..0220.0..",
-    "..00...0..",
-  ]
-
-  # Boar: 12x12 chunky dark-brown side-on, tan snout to the right, tusks.
-  BoarPattern = @[
-    "............",
-    "............",
-    "...0000000..",
-    "..05555560..",
-    ".055555560..",
-    "0555055560..",
-    "0555505560.0",
-    "055555560.2.",
-    "0555555560..",
-    ".05055505...",
-    "..0.0.0.0...",
-    "............",
-  ]
-
-  # Stag: 12x12 tan body, branching dark-brown antlers above head.
-  StagPattern = @[
-    "5...5..5..5.",
-    ".5.5.55.55..",
-    "..555.5.5...",
-    "..050050....",
-    "..050050....",
-    ".06666660...",
-    "06606066060.",
-    "06666666660.",
-    "06666666660.",
-    ".06606606600",
-    "..0..0..0.0.",
-    "............",
-  ]
-
-  MoosePattern = @[
-    "5..5..5..5..5.",
-    ".5.55.5.55.5..",
-    "..555.5..555..",
-    "...5555555....",
-    "...050050.....",
-    "..0aaaaaaa0...",
-    "..0aa000aa0...",
-    ".0aaaaaaaaaa0.",
-    ".0aaaaaaaaa0..",
-    ".0aaa00aaaa0..",
-    ".0aaaaaaaaaa0.",
-    "..0a.0..0.a0..",
-    "..0a.0..0.a0..",
-    "...0.0..0..0..",
-  ]
-
-  ElephantPattern = @[
-    ".....000000...",
-    "...011111110..",
-    "..0111111111..",
-    ".01111001111..",
-    "011111001111..",
-    "01111111111110",
-    "01111111111110",
-    "01111111111110",
-    ".0111100011110",
-    ".0111000011110",
-    ".01100..011110",
-    ".010....01110.",
-    "..2......020..",
-    "..........2...",
-  ]
-
-  # Tree: 12x12 bushy green canopy with a thick brown trunk.
-  TreePattern = [
-    "....00......",
-    "...0bb0.....",
-    "..0babbb0...",
-    ".0bbabbab0..",
-    "0babbabbab0.",
-    "0bbabbbabb0.",
-    "0bababbabb0.",
-    ".0babbabb0..",
-    "..0abbab0...",
-    "....55......",
-    "....55......",
-    "....50......",
-  ]
-
-  # Rock: 12x12 rounded boulder, gray, with highlight + base shadow.
-  RockPattern = [
-    "............",
-    "....0000....",
-    "...011110...",
-    "..01122110..",
-    ".0112211110.",
-    "011112211110",
-    "011111111110",
-    ".01111011110",
-    "..0111110...",
-    "...01010....",
-    "....000.....",
-    "............",
-  ]
-
-  # Grass: 12x12 dark-green field with sparse highlights. Tiles cleanly
-  # because the highlight pattern has no edge artifacts.
-  GrassPattern = [
-    "aaaaabaaaaaa",
-    "aaaaaaaaabaa",
-    "abaaaaaaaaaa",
-    "aaaaaabaaaba",
-    "aaaaaaaaaaaa",
-    "aaabaaaaaaaa",
-    "aaaaaaababaa",
-    "abaaaaaaaaaa",
-    "aaaaaaabaaaa",
-    "aaaabaaaaaaa",
-    "abaaaaaaabaa",
-    "aaaaabaaaaaa",
-  ]
-
-  CorpsePattern = [
-    "..00000000..",
-    ".0555555550.",
-    "055555555550",
-    "055555555550",
-    "055555555550",
-    "055555555550",
-    "055555555550",
-    "055555555550",
-    "055555555550",
-    "055555555550",
-    ".0555555550.",
-    "..00000000..",
-  ]
-
   # Kill glow: 16x16 yellow ring centered on a 12 px player. Center is
   # transparent so the player sprite shows through.
   KillGlowPattern = [
@@ -659,22 +525,6 @@ proc loadPngSprite(path: string): RgbaSprite =
       result.pixels[base + 1] = c.g
       result.pixels[base + 2] = c.b
       result.pixels[base + 3] = c.a
-
-proc tryLoadPngSprite(path: string): RgbaSprite =
-  if fileExists(path):
-    try:
-      return loadPngSprite(path)
-    except:
-      discard
-  RgbaSprite()
-
-proc preyPattern(kind: PreyKind): seq[string] =
-  case kind
-  of Rabbit: RabbitPattern
-  of Boar: BoarPattern
-  of Stag: StagPattern
-  of Moose: MoosePattern
-  of Elephant: ElephantPattern
 
 proc preySpriteSize(kind: PreyKind): int =
   case kind
@@ -1074,6 +924,24 @@ proc applyCaptures(sim: var SimServer) =
       echo "tick=", sim.tickCount, " caught ", sim.prey[i].kind,
         " +", reward.score, " for players=", participantIds,
         " scores=", sim.players.mapIt(it.score)
+      block:
+        var participants = newJArray()
+        for idx in participantIndices:
+          participants.add(%*{
+            "slot": sim.players[idx].slot,
+            "name": sim.players[idx].name,
+            "color": sim.players[idx].colorIndex,
+            "score": sim.players[idx].score,
+            "energy": sim.players[idx].energy
+          })
+        logEvent(sim.tickCount, "catch", %*{
+          "kind": $sim.prey[i].kind,
+          "x": sim.prey[i].tileX,
+          "y": sim.prey[i].tileY,
+          "by": participants,
+          "reward_energy": reward.energy,
+          "reward_score": reward.score
+        })
       removed.add(i)
   for i in countdown(removed.high, 0):
     sim.prey.delete(removed[i])
@@ -1237,40 +1105,24 @@ proc recolorPng(
 proc buildSpriteCache(sim: var SimServer) =
   let dir = spriteDir()
 
-  let treeFile = tryLoadPngSprite(dir / "tree.png")
-  sim.treeSprite = if treeFile.width > 0: treeFile else: patternToRgbaSprite(TreePattern)
-
-  let rockFile = tryLoadPngSprite(dir / "rock.png")
-  sim.rockSprite = if rockFile.width > 0: rockFile else: patternToRgbaSprite(RockPattern)
-
-  let grassFile = tryLoadPngSprite(dir / "grass.png")
-  sim.backgroundSprite = if grassFile.width > 0: grassFile else: patternToRgbaSprite(GrassPattern)
-
-  let corpseFile = tryLoadPngSprite(dir / "ded.png")
-  sim.corpseSprite = if corpseFile.width > 0: corpseFile else: patternToRgbaSprite(CorpsePattern)
+  sim.treeSprite = loadPngSprite(dir / "tree.png")
+  sim.rockSprite = loadPngSprite(dir / "rock.png")
+  sim.backgroundSprite = loadPngSprite(dir / "grass.png")
+  sim.corpseSprite = loadPngSprite(dir / "ded.png")
 
   sim.killGlowSprite = patternToRgbaSprite(KillGlowPattern)
 
   const preyFileNames: array[5, string] = ["rabbit", "boar", "stag", "moose", "elephant"]
   for kind in PreyKind:
-    let pngSprite = tryLoadPngSprite(dir / preyFileNames[kind.ord] & ".png")
-    sim.preySprites[kind.ord] =
-      if pngSprite.width > 0: pngSprite
-      else: patternToRgbaSprite(preyPattern(kind))
+    sim.preySprites[kind.ord] = loadPngSprite(dir / preyFileNames[kind.ord] & ".png")
 
-  let hunterFile = tryLoadPngSprite(dir / "hunter.png")
+  let hunterFile = loadPngSprite(dir / "hunter.png")
   for colorSlot in 0 ..< NumPlayerColors:
     let body = playerBodyRgba(colorSlot)
     let accent = playerAccentRgba(colorSlot)
     for facing in Facing:
-      if hunterFile.width > 0:
-        sim.playerSprites[colorSlot * 4 + facing.ord] =
-          recolorPng(hunterFile, body, accent)
-      else:
-        # Fallback pattern uses palette indices; map first 16 slots to old palette colors
-        let bodyPal = if colorSlot < 16: uint8(colorSlot) else: 3'u8
-        sim.playerSprites[colorSlot * 4 + facing.ord] =
-          patternToRgbaSprite(PlayerPattern, bodyPal, bodyPal, facing)
+      sim.playerSprites[colorSlot * 4 + facing.ord] =
+        recolorPng(hunterFile, body, accent)
 
   sim.indicatorSprites[0] = patternToRgbaSprite(Indicator1Pattern)
   sim.indicatorSprites[1] = patternToRgbaSprite(Indicator2Pattern)
@@ -1770,11 +1622,11 @@ proc isStaticRoute(route: string): bool =
 proc serveClientFile(request: Request, route: string): bool =
   if request.httpMethod != "GET":
     return false
-  let filePath = clientStaticPath(route, GlobalClientRoute)
+  let filePath = clientStaticPath(route)
   if filePath.len == 0:
     return false
   var headers: HttpHeaders
-  headers["Content-Type"] = clientStaticContentType(route, GlobalClientRoute)
+  headers["Content-Type"] = clientStaticContentType(route)
   headers["Cache-Control"] = "no-cache"
   if not fileExists(filePath):
     request.respond(404, headers, "Missing static client: " & route)
@@ -1816,7 +1668,7 @@ proc httpHandler(request: Request) =
     discard
   elif request.path == WebSocketPath and request.httpMethod == "GET" and
       not request.isWebSocketUpgrade():
-    discard request.serveClientFile(GlobalClientRoute)
+    discard request.serveClientFile(PlayerClientRoute)
   elif request.path == GlobalWebSocketPath and request.httpMethod == "GET" and
       not request.isWebSocketUpgrade():
     discard request.serveClientFile(GlobalClientRoute)
@@ -1846,6 +1698,10 @@ proc httpHandler(request: Request) =
         appState.playerTokens[websocket] = token
     echo "player connected: ", (if name.len > 0: name else: "anonymous"),
       " slot=", slot
+    logEvent(0, "player_connect", %*{
+      "name": name,
+      "slot": slot
+    })
   elif request.path == GlobalWebSocketPath and request.httpMethod == "GET":
     let websocket = request.upgradeToWebSocket()
     {.gcsafe.}:
@@ -1972,9 +1828,15 @@ proc runServerLoop(
   host = DefaultHost,
   port = DefaultPort,
   config = defaultGameConfig(),
-  saveScoresPath = ""
+  saveScoresPath = "",
+  eventLogPath = ""
 ) =
+  openEventLog(eventLogPath)
   initAppState(config)
+  logEvent(0, "server_start", %*{
+    "host": host, "port": port, "seed": config.seed,
+    "max_ticks": config.maxTicks, "max_games": config.maxGames
+  })
 
   let httpServer = newServer(
     httpHandler,
@@ -2053,6 +1915,25 @@ proc runServerLoop(
         for i in 0 ..< sim.players.len:
           sim.players[i].overlayActive = true
         echo "round ", gamesPlayed, " ended, scores=", scores
+        block:
+          var rosterArr = newJArray()
+          for p in sim.players:
+            var catchesArr = newJArray()
+            if p.slot >= 0 and p.slot < sim.stats.len:
+              for kind in PreyKind:
+                catchesArr.add(%*{"kind": $kind, "n": sim.stats[p.slot].catches[kind]})
+            rosterArr.add(%*{
+              "slot": p.slot,
+              "name": p.name,
+              "color": p.colorIndex,
+              "score": p.score,
+              "energy": p.energy,
+              "catches": catchesArr
+            })
+          logEvent(sim.tickCount, "round_end", %*{
+            "round": gamesPlayed,
+            "players": rosterArr
+          })
     of RoundEnding:
       inc roundEndTick
       if roundEndTick >= RoundEndDisplayTicks:
@@ -2061,6 +1942,8 @@ proc runServerLoop(
           if saveScoresPath.len > 0:
             writeFile(saveScoresPath, sim.playerResultsJson(roundScores) & "\n")
             echo "results written to: ", saveScoresPath
+          logEvent(sim.tickCount, "tournament_end", %*{"games": gamesPlayed})
+          closeEventLog()
           httpServer.close()
           joinThread(serverThread)
           break
@@ -2068,6 +1951,19 @@ proc runServerLoop(
           sim.resetRound(config, gamesPlayed)
           roundPhase = RoundPlaying
           echo "starting round ", gamesPlayed + 1
+          block:
+            var rosterArr = newJArray()
+            for p in sim.players:
+              rosterArr.add(%*{
+                "slot": p.slot, "name": p.name, "color": p.colorIndex,
+                "x": p.tileX, "y": p.tileY
+              })
+            logEvent(0, "round_start", %*{
+              "round": gamesPlayed + 1,
+              "seed": config.seed + gamesPlayed,
+              "max_ticks": config.maxTicks,
+              "players": rosterArr
+            })
 
     for i in 0 ..< playerSockets.len:
       var nextState: ViewerState
@@ -2105,6 +2001,7 @@ when isMainModule:
     port = DefaultPort
     configPath = cogamePath(getEnv("COGAME_CONFIG_URI"), "COGAME_CONFIG_URI")
     saveScoresPath = cogamePath(getEnv("COGAME_RESULTS_URI"), "COGAME_RESULTS_URI")
+    eventLogPath = getEnv("STAG_HUNT_EVENT_LOG")
   for kind, key, val in getopt():
     case kind
     of cmdLongOption:
@@ -2113,6 +2010,7 @@ when isMainModule:
       of "port": port = parseInt(val)
       of "config-file": configPath = val
       of "save-scores": saveScoresPath = val
+      of "event-log": eventLogPath = val
       else: discard
     else: discard
   var config = defaultGameConfig()
@@ -2128,4 +2026,4 @@ when isMainModule:
     echo "  maxGames=", config.maxGames
   if config.closedRoster:
     echo "  closedRoster with ", config.tokens.len, " slots"
-  runServerLoop(address, port, config, saveScoresPath)
+  runServerLoop(address, port, config, saveScoresPath, eventLogPath)
