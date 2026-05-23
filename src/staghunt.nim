@@ -235,13 +235,16 @@ const
 var appState: WebSocketAppState
 
 # Event log (JSONL). Each line: {"t": tick, "ev": name, ...}.
-# Written from the main sim loop only — no locking required.
+# logEvent is called from the main sim loop *and* the http handler
+# threads (for player_connect), so the file write needs a lock.
 var eventLogFile: File
 var eventLogActive = false
+var eventLogLock: Lock
 
 proc openEventLog(path: string) =
   if path.len == 0: return
   try:
+    initLock(eventLogLock)
     eventLogFile = open(path, fmWrite)
     eventLogActive = true
   except IOError as e:
@@ -257,11 +260,14 @@ proc logEvent(tick: int, name: string, fields: JsonNode) =
   var obj = %*{"t": tick, "ev": name}
   for k, v in fields.pairs:
     obj[k] = v
-  try:
-    eventLogFile.writeLine($obj)
-    eventLogFile.flushFile()
-  except IOError:
-    eventLogActive = false
+  let serialized = $obj
+  {.gcsafe.}:
+    withLock eventLogLock:
+      try:
+        eventLogFile.writeLine(serialized)
+        eventLogFile.flushFile()
+      except IOError:
+        eventLogActive = false
 
 proc defaultGameConfig(): GameConfig =
   GameConfig(
@@ -616,6 +622,9 @@ proc addPrey(sim: var SimServer, kind: PreyKind) =
     tileY: spot.ty,
     thinkCooldown: sim.rng.rand(PreyThinkIntervalTicks)
   )
+  logEvent(sim.tickCount, "prey_spawn", %*{
+    "kind": $kind, "id": sim.nextPreyId, "x": spot.tx, "y": spot.ty
+  })
   inc sim.nextPreyId
 
 proc countKind(sim: SimServer, kind: PreyKind): int =
@@ -1551,6 +1560,22 @@ proc step(sim: var SimServer, inputs: openArray[InputState]) =
   sim.applyCaptures()
   sim.ageCorpses()
   sim.maintainPrey()
+
+  # Periodic positional snapshot — every 60 ticks (~2.5s). Useful for
+  # spotting "why didn't the hunters converge?" without per-frame spam.
+  if eventLogActive and (sim.tickCount mod 60 == 0):
+    var playersArr = newJArray()
+    for p in sim.players:
+      playersArr.add(%*{
+        "slot": p.slot, "name": p.name,
+        "x": p.tileX, "y": p.tileY, "energy": p.energy, "score": p.score
+      })
+    var preyArr = newJArray()
+    for p in sim.prey:
+      preyArr.add(%*{"kind": $p.kind, "x": p.tileX, "y": p.tileY})
+    logEvent(sim.tickCount, "snapshot", %*{
+      "players": playersArr, "prey": preyArr
+    })
 
 # ---------------------------------------------------------------------------
 # WebSocket plumbing (modelled on big_adventure)

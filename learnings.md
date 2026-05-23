@@ -208,19 +208,76 @@ no ally near a stag, letting the ally lead). Out of scope for "make
 existing players follow stated strategy" — sidekick *is* following
 its strategy; the strategy just doesn't compose with stag_hunter's.
 
+## Subgoal 2 — moose_hunter, elephant_hunter
+
+Built as copies of stag_hunter with three differences each:
+- target filter (`Moose` / `Elephant` instead of `Stag`)
+- required hunters (3 / 4 instead of 2) — drives the cooperation-bonus
+  scaling and the alliesAdjacent skip threshold in `chooseTarget`
+- side selection: any unoccupied side instead of opposing-pair logic,
+  with rank-based primary side assignment
+
+The first cut had **rank-based side assignment** wrong: when several
+hunters approach from the same direction (the common case for fleeing
+prey since they all chase), an approach-direction-based side pick
+makes them all want the same side. Fixed by sorting visible hunters
+by `objectId` and using `myRank mod 4` as primary side. Three hunters
+with the same view of each other pick three distinct sides.
+
+The second bug: `chooseMoose` could pick a *different* moose than the
+one I was already adjacent to, abandoning a partial encirclement.
+Fixed by short-circuiting: if I'm cardinally adjacent to any visible
+moose, hold there.
+
+Results (60s, 3 moose_hunter self-play across seeds):
+- default seed: 1 moose caught
+- seed=1: 0
+- seed=42: 0
+
+Results (60s, 4 elephant_hunter): 0 elephants across all seeds tried.
+
+Mixed (2 moose + 2 elephant): 0 of either big game, as expected (test d).
+Failure case (1 moose_hunter + 2 rabbiteers): moose_hunter scored 0,
+rabbiteers got their rabbits. Test a's negative half passes.
+
+Open: success criteria a (moose) and b (elephant) are only flaky-passing.
+The bots demonstrably *try* to encircle, but the game's fleeing dynamics
++ slow per-hunter cadence + thin energy budget make complete
+encirclement rare. Three fixes worth considering, in order of cost:
+
+1. **Game tuning** (subgoal 4): reduce `PreyFleeProb*` for Moose and
+   Elephant — they're cumbersome animals; 75% flee at range 1 is more
+   appropriate for rabbits than for an elephant.
+2. **Smarter prediction**: predict where the prey will flee (away from
+   the nearest visible hunter) and pre-position one hunter on the flee
+   path. Same complexity tier as the modeler bot.
+3. **Better assignment**: a stable matching pass where 3-of-N hunters
+   commit to one specific moose. Effective but visibility-sensitive.
+
+## Concurrency bug fixed during subgoal 2
+
+The event log writer wasn't thread-safe. `player_connect` is emitted
+from the HTTP handler thread; everything else from the main sim loop.
+Two threads writing simultaneously would interleave bytes mid-line. A
+single-line JSONL became two-record-no-newline corruption that broke
+the summary script. Fixed with a `Lock` around the file write.
+Symptom in the wild: `JSONDecodeError: Extra data: line 1 column 58`
+when reading events.jsonl shortly after game start.
+
 ## Next steps
 
-Subgoal 2: moose_hunter and elephant_hunter. Lifting from stag_hunter
-with three changes per bot:
-- target filter (`Moose` / `Elephant` instead of `Stag`)
-- required hunters (3 / 4 instead of 2)
-- side selection: any unoccupied side instead of opposing-pair logic
+Subgoal 3: a modeling player that tracks per-color hunt-success
+outcomes and adapts. The mechanism is more interesting than the
+fixed-strategy bots: it has to *test* hypotheses, not just enact them.
+Sketch:
 
-The duplication question: each new bot is ~600 lines, ~500 of which is
-sprite parsing + camera + obstacle map + nav + parseopt boilerplate
-that's identical to stag_hunter. There is a real `common/coop.nim`
-extraction worth doing, but the right boundary is the *whole* Bot
-object (sprites, objects, camera, navigation), not just the hunting
-helpers. Defer the refactor until after both new bots exist — five
-near-identical files make the boundaries obvious. For now: copy
-stag_hunter, change the three things.
+- Per visible player color, keep counters: tried-stag-with-them-success,
+  tried-stag-with-them-fail, etc. for each prey kind.
+- When picking a hunt, score each option by expected-points-per-cycle
+  using observed success rates. Default to "no data → try once."
+- Decay old observations so a colony that learned new tricks gets
+  re-evaluated.
+
+The hard part: a player can only learn from cooperations it actually
+participated in. So early-game it has to *seed* the data — try a stag,
+see who joined, attribute success/failure. Same for boar/moose/elephant.
