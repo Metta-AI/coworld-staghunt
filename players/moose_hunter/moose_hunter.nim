@@ -192,6 +192,11 @@ proc applySpritePacket(bot: var Bot, packet: string): bool =
       if offset + 2 > packet.len: return false
       bot.selfObjectId = packet.readU16(offset)
       offset += 2
+    of 0x08:
+      # Self energy. Moose don't trample so this bot ignores the value,
+      # but must consume the 2-byte payload to stay in sync.
+      if offset + 2 > packet.len: return false
+      offset += 2
     else:
       return false
   true

@@ -1277,6 +1277,12 @@ proc addIdentity(packet: var seq[uint8], objectId: int) =
   packet.addU8(0x07'u8)
   packet.addU16(objectId)
 
+proc addEnergy(packet: var seq[uint8], energy: int) =
+  # 0x08 = self energy. Sent every per-player frame so bots can throttle
+  # hunt behavior when low. Clamped to [0, 65535]; in practice 0..MaxEnergy.
+  packet.addU8(0x08'u8)
+  packet.addU16(max(0, energy))
+
 # ---------------------------------------------------------------------------
 # Sprite cache
 # ---------------------------------------------------------------------------
@@ -1749,6 +1755,7 @@ proc buildPlayerFrame(
   if playerIndex < 0 or playerIndex >= sim.players.len:
     return
   result.addIdentity(PlayerObjectBase + playerIndex)
+  result.addEnergy(sim.players[playerIndex].energy)
   if sim.players[playerIndex].overlayActive:
     result.addOverlayObjects(sim, playerIndex)
     return

@@ -371,6 +371,35 @@ their difficulty. That's the next tuning if I revisit:
 I prefer the latter — score inflation cascades into trust thresholds
 in the modeler.
 
+## Energy awareness — added after interactive session
+
+Interactive long-running game surfaced a regression hidden by 60s
+eval rounds: bots had **no way to read their own energy**. They'd
+keep walking into elephants, get trampled (-30 each hit), and burn
+movement energy (2 per step) until pinned at 0-1. Once there, the
+server denied every move (`if p.energy < MoveEnergyCost: return`)
+so the bot looked frozen with `stuckCount` climbing into
+`unstickStep` territory — explaining the "back and forth with no
+direction" behavior the user saw.
+
+Fix:
+1. Server adds packet message type **0x08** in every per-player
+   frame carrying the player's current energy as a u16 right after
+   the existing 0x07 identity message.
+2. `elephant_hunter` reads it into `bot.energy` and applies a
+   hysteretic gate: drop below 32 → retreat to chebyshev ≥ 5 from
+   any visible elephant and hold for passive recharge; climb back
+   to 64 → rejoin hunt. Exception: if already at chebyshev ≤ 2
+   with 2+ allies near, commit — don't bail mid-capture.
+3. All other bots (`moose_hunter`, `stag_hunter`, `modeler`,
+   `rabbiteer`, `sidekick`, `coordinator`, `nearest_hunter`) skip
+   past the 2-byte payload so the protocol stays compatible.
+4. The browser `global_client` viewer also consumes-and-ignores
+   the field so the user's `/player` viewer keeps working.
+
+End-of-round energy after fix: 22-180 (was 0-1). Captures per round
+unchanged at ~1.0 average across seeds — bots no longer starve.
+
 ## Open work — not done in this pass
 
 - Energy-conservation mode for stag_hunter (4-player self-play

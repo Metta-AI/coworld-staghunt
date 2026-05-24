@@ -218,6 +218,10 @@ proc applySpritePacket(bot: var Bot, packet: string): bool =
       if offset + 2 > packet.len: return false
       bot.selfObjectId = packet.readU16(offset)
       offset += 2
+    of 0x08:
+      # Self energy — skip past for now. (Future: feed into hunt scoring.)
+      if offset + 2 > packet.len: return false
+      offset += 2
     else:
       return false
   true

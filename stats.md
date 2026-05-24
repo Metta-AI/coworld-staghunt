@@ -35,20 +35,27 @@ stag_hunt/focus_eval.sh 4 300 5 1
 | (post-indifferent-cadence) | elephant_hunter | 4 elephant_hunter | self-play 60s default | 0 elephants in 5/5 focus rounds |
 | (focus + centroid spawn) | elephant_hunter | 4 elephant_hunter | focus_eval 4 600 5 (stationary) | 4 captures in 2/5 rounds |
 | (focus + moving elephant) | elephant_hunter | 4 elephant_hunter | focus_eval 4 600 5 | **6 captures over 5 rounds (1.2/round avg)** |
+| (energy packet + retreat, threshold 50→32) | elephant_hunter | 4 elephant_hunter | focus_eval 4 600 5 seeds 1/42/7 | **5/1/6 captures (avg 1.0/round)**; tramples 27/14/31 — bots survive instead of starving at 0 energy |
 
 ## Open issues snapshot (as of this writing)
 
 - **Moose hunting is solid.** 3 moose_hunters reliably catch 4-5 moose
   per 60s game across seeds. Per-hunter score ~40-50 pts. ✓
-- **Elephant capture is still rare even in focused-spawn mode.** 4
-  elephant_hunters with elephants spawning near the player cluster
-  still catch 0/5 in `focus_eval.sh 4 300 5 1`. The bots position at
-  the four diagonal corners (chebyshev 2 around the elephant), but
-  the elephant moves before all four step onto cardinal sides in the
-  same tick. The synchronized-dash needs more work, or the elephant
-  cadence needs to be slower than the player cadence (currently
-  elephant min 12 ticks, max 24; player move cooldown 5 ticks — so a
-  hunter has only 2-5 moves to converge before the elephant relocates).
+- **Energy regression fixed.** Interactive multi-round play showed all
+  7 elephant_hunters at energy 0-1 after one long round (162 tramples
+  vs 1 capture across the session). Root cause: bot had no way to
+  read its own energy, so it kept walking into elephants until movement
+  cost + trample loss bottomed it out. The recharge cap (100 < starting
+  120) meant once depleted, bots could only take one step per ~0.75s,
+  alternating between pathStep and unstickStep directions ("back and
+  forth" with no directed behavior). Fixed by adding 0x08 packet field
+  with self energy, and a hysteretic retreat (32 → 64) plus a "commit
+  if 2+ allies within 3 tiles and we're in striking range" exception.
+- **Elephant capture is still rare even in focused-spawn mode.** ~1
+  capture per round across seeds. Synchronized dash works when it
+  triggers but coordination is fragile — if one bot can't reach its
+  corner because the BFS is squeezed between ally-blocked tiles and
+  the elephant's cardinal-block ring, the whole capture stalls.
 - **Stag captures are noisy.** 0-3 per game depending on seed.
 - **User-facing trample feel.** Verified mid-iteration: too aggressive
   was due to scaling cadence with nearby hunters; reverted to flat

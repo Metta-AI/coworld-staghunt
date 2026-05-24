@@ -102,6 +102,9 @@ type
     lastSentNonZero: bool
     lastAdjacentPreyId: int
     adjacentWaitTicks: int
+    energy: int
+    energyKnown: bool
+    rechargingUntil: int  # frameTick at which to resume hunting after retreat
 
 proc readU16(blob: string, offset: int): int =
   int(uint16(blob[offset].uint8) or
@@ -191,6 +194,11 @@ proc applySpritePacket(bot: var Bot, packet: string): bool =
     of 0x07:
       if offset + 2 > packet.len: return false
       bot.selfObjectId = packet.readU16(offset)
+      offset += 2
+    of 0x08:
+      if offset + 2 > packet.len: return false
+      bot.energy = packet.readU16(offset)
+      bot.energyKnown = true
       offset += 2
     else:
       return false
@@ -353,7 +361,12 @@ proc pickExploreTarget(bot: var Bot) =
 proc chebyshev(ax, ay, bx, by: int): int =
   max(abs(ax - bx), abs(ay - by))
 
-const RequiredElephant = 4  # elephant needs all 4 cardinal sides
+const
+  RequiredElephant = 4  # elephant needs all 4 cardinal sides
+  LowEnergyThreshold = 32  # retreat threshold — survives 1 trample + 1 move
+  RechargedThreshold = 64  # rejoin hunting (2 tramples of buffer)
+  SafeDistance = 5  # chebyshev tiles from any elephant during retreat
+  CommitDistance = 2  # already in striking range — don't bail
 
 proc chooseElephant(
   selfX, selfY: int,
@@ -509,6 +522,79 @@ proc decideMask(bot: var Bot): uint8 =
     return bot.navigate(killSpot.x, killSpot.y)
 
   let prey = bot.visiblePrey()
+
+  # Energy gating with hysteresis. Once we drop below LowEnergyThreshold
+  # we set rechargingUntil = 1 (a sentinel "still recharging" marker) and
+  # stay in retreat until energy climbs to RechargedThreshold. Without
+  # the gate, bots wade into elephants at energy 30, get trampled to 0,
+  # and spend the rest of the round shuffling 1 tile per second.
+  if bot.energyKnown:
+    if bot.energy < LowEnergyThreshold:
+      bot.rechargingUntil = 1
+    elif bot.energy >= RechargedThreshold:
+      bot.rechargingUntil = 0
+  var lowEnergy = bot.energyKnown and bot.rechargingUntil != 0
+
+  # Don't bail mid-hunt: if we're already in striking range AND there are
+  # other hunters next to us, the capture is moments away. Eating one
+  # trample now and retreating after the kill is better than scattering
+  # and giving the elephant another loop to chew through everyone.
+  if lowEnergy:
+    var nearestElephantD = high(int)
+    for p in prey:
+      if p.kind != Elephant: continue
+      let d = chebyshev(bot.selfTileX, bot.selfTileY, p.tileX, p.tileY)
+      if d < nearestElephantD: nearestElephantD = d
+    if nearestElephantD <= CommitDistance:
+      var alliesClose = 0
+      for pl in players:
+        if pl.objectId == bot.selfObjectId: continue
+        if chebyshev(pl.tileX, pl.tileY, bot.selfTileX, bot.selfTileY) <= 3:
+          inc alliesClose
+      if alliesClose >= 2:
+        lowEnergy = false
+
+  if lowEnergy:
+    # Retreat: find the farthest direction from any visible elephant and
+    # step there, or hold still if already safe. Allies' positions count
+    # as blocked so we don't bunch up on one safe tile.
+    var blocked: seq[tuple[x, y: int]] = @[]
+    for pl in players:
+      if pl.objectId != bot.selfObjectId:
+        blocked.add((pl.tileX, pl.tileY))
+    var nearestElephantDist = high(int)
+    var ex, ey = 0
+    for p in prey:
+      if p.kind != Elephant: continue
+      let d = chebyshev(bot.selfTileX, bot.selfTileY, p.tileX, p.tileY)
+      if d < nearestElephantDist:
+        nearestElephantDist = d; ex = p.tileX; ey = p.tileY
+    if nearestElephantDist >= SafeDistance:
+      bot.updateStuckState(0)
+      return 0
+    # Move directly away from the elephant. Pick the in-bounds, non-
+    # blocked neighbor that maximizes distance to the elephant.
+    var bestDist = nearestElephantDist
+    var bestTx = bot.selfTileX
+    var bestTy = bot.selfTileY
+    const dirs = [(0, -1), (1, 0), (0, 1), (-1, 0)]
+    for d in dirs:
+      let nx = bot.selfTileX + d[0]
+      let ny = bot.selfTileY + d[1]
+      if not inBounds(nx, ny): continue
+      if bot.obstacleMap.getTile(nx, ny) == TileBlocked: continue
+      var occupied = false
+      for b in blocked:
+        if b.x == nx and b.y == ny: occupied = true; break
+      if occupied: continue
+      let dd = chebyshev(nx, ny, ex, ey)
+      if dd > bestDist:
+        bestDist = dd; bestTx = nx; bestTy = ny
+    if bestTx == bot.selfTileX and bestTy == bot.selfTileY:
+      bot.updateStuckState(0)
+      return 0
+    return bot.navigateAvoiding(bestTx, bestTy, blocked)
+
   let elephant = chooseElephant(bot.selfTileX, bot.selfTileY, prey, players, bot.selfObjectId)
 
   # Hunt strategy:
