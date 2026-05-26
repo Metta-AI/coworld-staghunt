@@ -3,7 +3,7 @@ import pixie
 import supersnappy
 import bitworld/client
 import bitworld/cogame_runtime
-import protocol, server
+import bitworld/protocol, bitworld/server
 import std/[json, locks, monotimes, os, parseopt, random, sequtils, sets, strutils, tables, times]
 
 const

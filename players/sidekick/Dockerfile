@@ -25,20 +25,20 @@ https://github.com/treeform/nimby/releases/download/0.1.26/nimby-Linux-ARM64; \
 
 ENV PATH="/root/.nimby/nim/bin:$PATH"
 
-WORKDIR /workspace/bitworld
+WORKDIR /workspace/cogame-staghunt
 COPY nimby.lock .
-RUN nimby --global sync nimby.lock && \
-  cat nim.cfg >> /root/.nimby/nim/config/nim.cfg
+RUN nimby sync nimby.lock && \
+  nimby install https://github.com/Metta-AI/bitworld.git
 
 COPY . .
-WORKDIR /workspace/bitworld/stag_hunt/players/sidekick
 ARG NimFlags="-d:release -d:useMalloc --opt:speed --stackTrace:on"
 ARG NimCommand="c"
-ARG NimMain="sidekick.nim"
+ARG NimMain="players/sidekick/sidekick.nim"
 RUN nim $NimCommand \
   $NimFlags \
-  --nimcache:/tmp/bitworld-nimcache \
-  --out:sidekick \
+  --path:src \
+  --nimcache:/tmp/cogame-nimcache \
+  --out:/bin/sidekick \
   $NimMain
 
 # Run Docker.
@@ -50,10 +50,6 @@ RUN apt-get update && \
     libssl3 && \
   rm -rf /var/lib/apt/lists/*
 
-WORKDIR /workspace/bitworld
-COPY --from=build \
-  /workspace/bitworld/stag_hunt/players/sidekick/sidekick \
-  /bin/sidekick
+COPY --from=build /bin/sidekick /bin/sidekick
 
-WORKDIR /workspace/bitworld/stag_hunt/players/sidekick
 CMD ["/bin/sidekick", "--address:host.docker.internal", "--port:8080"]

@@ -4,11 +4,11 @@
 # per round.
 #
 # Usage:
-#   stag_hunt/focus_eval.sh <num_hunters> [ticks_per_round] [num_rounds] [seed]
+#   ./focus_eval.sh <num_hunters> [ticks_per_round] [num_rounds] [seed]
 #
 # Defaults: 4 hunters, 300 ticks (~12s), 5 rounds, seed 1.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")"
 
 HUNTERS="${1:-4}"
 TICKS="${2:-300}"
@@ -26,11 +26,11 @@ EOF
 
 lsof -ti tcp:$PORT 2>/dev/null | xargs -r kill -9 2>/dev/null || true
 
-(cd stag_hunt && ../out/stag_hunt \
+(./out/staghunt \
   --port:"$PORT" \
-  --config-file:"../$OUTDIR/config.json" \
-  --save-scores:"../$OUTDIR/scores.json" \
-  --event-log:"../$OUTDIR/events.jsonl") \
+  --config-file:"$OUTDIR/config.json" \
+  --save-scores:"$OUTDIR/scores.json" \
+  --event-log:"$OUTDIR/events.jsonl") \
   > "$OUTDIR/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true; pkill -f "out/elephant_hunter --port:$PORT" 2>/dev/null || true' EXIT INT TERM

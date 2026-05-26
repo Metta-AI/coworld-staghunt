@@ -2,7 +2,7 @@
 
 ## Context
 
-You're working on `/Users/malcolm/dev/bitworld/stag_hunt`. This is a cooperative hunting game where players surround prey on cardinal sides to capture them. The game uses a sprite_v1 protocol over WebSocket (not a framebuffer).
+You're working on `/Users/malcolm/dev/games/staghunt`. This is a cooperative hunting game where players surround prey on cardinal sides to capture them. The game uses a sprite_v1 protocol over WebSocket (not a framebuffer).
 
 ### Capture rules
 - Rabbit: 1 player on any cardinal side
@@ -11,13 +11,13 @@ You're working on `/Users/malcolm/dev/bitworld/stag_hunt`. This is a cooperative
 - Moose: 3+ cardinal sides occupied
 - Elephant: all 4 cardinal sides
 
-### Key server constants (in stag_hunt.nim)
+### Key server constants (in src/staghunt.nim)
 - PlayerMoveCooldownTicks = 5 (server only moves a player every 5 frames at 24fps)
 - World is 32x32 tiles, tile size 12px, viewport 128x128px
 - Indicator dots (yellow) show which empty sides would help complete a capture
 
 ### Indicator dot logic (already in server)
-The server shows dots on tiles adjacent to prey where a player stepping there would help complete a capture. The number of dots shows how many MORE players are needed. This is computed by `validIndicatorSides` in stag_hunt.nim. **Verify**: with 2 players next to an elephant, remaining sides should show 2-dot indicators (need 2 more), not 3-dot. Check `addIndicatorObjects` — it uses `preyMinPlayers(kind) - occupied` for the dot count, which should already be correct (4-2=2 dots).
+The server shows dots on tiles adjacent to prey where a player stepping there would help complete a capture. The number of dots shows how many MORE players are needed. This is computed by `validIndicatorSides` in src/staghunt.nim. **Verify**: with 2 players next to an elephant, remaining sides should show 2-dot indicators (need 2 more), not 3-dot. Check `addIndicatorObjects` — it uses `preyMinPlayers(kind) - occupied` for the dot count, which should already be correct (4-2=2 dots).
 
 ### Bot architecture
 Each bot connects as a WebSocket client to `/player?name=botname`. The server sends sprite_v1 frames (sprite definitions + object placements). Bots parse these to derive:
@@ -74,8 +74,8 @@ Implementation: scan objects in range 9000-9999 for indicator sprites (id 20-22)
 
 ## Files
 
-- Server: `stag_hunt/stag_hunt.nim`
-- Bots: `stag_hunt/players/{big_game_hunter,nearest_hunter,rabbiteer,sidekick,stag_hunter,moose_hunter,elephant_hunter,modeler}/<name>.nim`
+- Server: `src/staghunt.nim`
+- Bots: `players/{big_game_hunter,nearest_hunter,rabbiteer,sidekick,stag_hunter,moose_hunter,elephant_hunter,modeler}/<name>.nim`
 - Protocol: `common/protocol.nim` (button constants, InputState)
 - Server framework: `common/server.nim` (Facing, TransparentColorIndex, Framebuffer)
 
@@ -83,12 +83,12 @@ Implementation: scan objects in range 9000-9999 for indicator sprites (id 20-22)
 
 ```bash
 # Compile
-nim c -d:release -o:out/stag_hunt stag_hunt/stag_hunt.nim
-nim c -d:release -o:out/rabbiteer stag_hunt/players/rabbiteer/rabbiteer.nim
+nim c -d:release -o:out/staghunt src/staghunt.nim
+nim c -d:release -o:out/rabbiteer players/rabbiteer/rabbiteer.nim
 # etc for each bot
 
 # Run server
-./out/stag_hunt --port:8090 --address:0.0.0.0
+./out/staghunt --port:8090 --address:0.0.0.0
 
 # Run one bot with visible output
 ./out/rabbiteer --port:8090 --name:rabbiteer

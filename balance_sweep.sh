@@ -8,16 +8,16 @@
 # of "where is balance off?"
 #
 # Usage:
-#   stag_hunt/balance_sweep.sh                                # default grid
-#   stag_hunt/balance_sweep.sh --rounds=3 --ticks=1800        # short games
-#   stag_hunt/balance_sweep.sh --seeds=1,42,7 --rounds=3      # 3 seeds
-#   stag_hunt/balance_sweep.sh --rosters=moose4,elephant4     # subset
-#   stag_hunt/balance_sweep.sh --port=8093 --no-build         # alt port
+#   ./balance_sweep.sh                                # default grid
+#   ./balance_sweep.sh --rounds=3 --ticks=1800        # short games
+#   ./balance_sweep.sh --seeds=1,42,7 --rounds=3      # 3 seeds
+#   ./balance_sweep.sh --rosters=moose4,elephant4     # subset
+#   ./balance_sweep.sh --port=8093 --no-build         # alt port
 #
 # Adding a new roster: extend the case in `roster_for` below.
 
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")"
 
 PORT=8092
 SEEDS="5744151,1,42"
@@ -57,7 +57,7 @@ roster_for() {
 
 if [[ $BUILD -eq 1 ]]; then
   echo "[sweep] building server + bots..."
-  nim c -d:release --hints:off -o:out/stag_hunt stag_hunt/stag_hunt.nim > /tmp/sweep_build.log 2>&1
+  nim c -d:release --hints:off -o:out/staghunt src/staghunt.nim > /tmp/sweep_build.log 2>&1
   # Build any bot referenced by any roster we'll run.
   declare -A SEEN_BOT
   IFS=',' read -A ROSTER_ARR <<< "$ROSTERS" 2>/dev/null || \
@@ -67,7 +67,7 @@ if [[ $BUILD -eq 1 ]]; then
     for b in $bots; do
       if [[ -z "${SEEN_BOT[$b]:-}" ]]; then
         SEEN_BOT[$b]=1
-        nim c -d:release --hints:off -o:"out/$b" "stag_hunt/players/$b/$b.nim" >> /tmp/sweep_build.log 2>&1
+        nim c -d:release --hints:off -o:"out/$b" "players/$b/$b.nim" >> /tmp/sweep_build.log 2>&1
       fi
     done
   done
@@ -99,11 +99,11 @@ run_one() {
 {"seed": $seed, "maxTicks": $TICKS, "maxGames": $ROUNDS}
 EOF
   lsof -ti tcp:$PORT 2>/dev/null | xargs -r kill -9 2>/dev/null || true
-  (cd stag_hunt && ../out/stag_hunt --port:$PORT \
-      --config-file:"../$outdir/cfg.json" \
-      --event-log:"../$outdir/events.jsonl" \
-      --save-scores:"../$outdir/scores.json" \
-      > "../$outdir/server.log" 2>&1) &
+  (./out/staghunt --port:$PORT \
+      --config-file:"$outdir/cfg.json" \
+      --event-log:"$outdir/events.jsonl" \
+      --save-scores:"$outdir/scores.json" \
+      > "$outdir/server.log" 2>&1) &
   local SERVER_PID=$!
   for _ in $(seq 1 50); do curl -fs http://localhost:$PORT/healthz >/dev/null 2>&1 && break; sleep 0.1; done
   local i=0

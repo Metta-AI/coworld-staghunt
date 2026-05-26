@@ -1,0 +1,13 @@
+.DS_Store
+nimcache/
+out/
+tmp/
+/staghunt
+/players/big_game_hunter/big_game_hunter
+/players/elephant_hunter/elephant_hunter
+/players/modeler/modeler
+/players/moose_hunter/moose_hunter
+/players/nearest_hunter/nearest_hunter
+/players/rabbiteer/rabbiteer
+/players/sidekick/sidekick
+/players/stag_hunter/stag_hunter

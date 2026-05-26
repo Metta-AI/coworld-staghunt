@@ -2,13 +2,13 @@
 # Local eval harness for stag_hunt.
 #
 # Usage:
-#   stag_hunt/eval.sh <roster> [options]
+#   ./eval.sh <roster> [options]
 #
 # <roster> is a comma-separated list of bot names, e.g.
 #   rabbiteer,rabbiteer,stag_hunter,stag_hunter
 #
 # Each name must correspond to an executable in ./out/ (built via
-# `nim c -d:release -o:out/<name> stag_hunt/players/<name>/<name>.nim`).
+# `nim c -d:release -o:out/<name> players/<name>/<name>.nim`).
 # Names may be suffixed with a colon and tag for disambiguation when the
 # same binary appears more than once, e.g. `stag_hunter:a,stag_hunter:b`.
 #
@@ -30,7 +30,7 @@
 #
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")"
 
 ROSTER=""
 PORT=8090
@@ -103,13 +103,13 @@ done
 
 if [[ $BUILD -eq 1 ]]; then
   echo "[eval] building server + bots..."
-  nim c -d:release -o:out/stag_hunt stag_hunt/stag_hunt.nim > "$OUTDIR/build.log" 2>&1
+  nim c -d:release -o:out/staghunt src/staghunt.nim > "$OUTDIR/build.log" 2>&1
   for bin in "${BINS[@]}"; do
     if [[ ! -x "out/$bin" ]]; then
-      if [[ -f "stag_hunt/players/$bin/$bin.nim" ]]; then
-        nim c -d:release -o:"out/$bin" "stag_hunt/players/$bin/$bin.nim" >> "$OUTDIR/build.log" 2>&1
+      if [[ -f "players/$bin/$bin.nim" ]]; then
+        nim c -d:release -o:"out/$bin" "players/$bin/$bin.nim" >> "$OUTDIR/build.log" 2>&1
       else
-        echo "[eval] missing binary out/$bin and no source at stag_hunt/players/$bin/$bin.nim" >&2
+        echo "[eval] missing binary out/$bin and no source at players/$bin/$bin.nim" >&2
         exit 1
       fi
     fi
@@ -124,12 +124,11 @@ EOF
 
 # Start the server.
 echo "[eval] starting server on port $PORT (seed=$SEED_DEC, ticks=$TICKS, rounds=$ROUNDS)"
-(cd stag_hunt && \
-  ../out/stag_hunt \
-    --port:"$PORT" \
-    --config-file:"../$CONFIG" \
-    --save-scores:"../$OUTDIR/scores.json" \
-    --event-log:"../$OUTDIR/events.jsonl") \
+./out/staghunt \
+  --port:"$PORT" \
+  --config-file:"$CONFIG" \
+  --save-scores:"$OUTDIR/scores.json" \
+  --event-log:"$OUTDIR/events.jsonl" \
   > "$OUTDIR/server.log" 2>&1 &
 SERVER_PID=$!
 

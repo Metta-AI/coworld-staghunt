@@ -25,20 +25,20 @@ https://github.com/treeform/nimby/releases/download/0.1.26/nimby-Linux-ARM64; \
 
 ENV PATH="/root/.nimby/nim/bin:$PATH"
 
-WORKDIR /workspace/bitworld
+WORKDIR /workspace/cogame-staghunt
 COPY nimby.lock .
-RUN nimby --global sync nimby.lock && \
-  cat nim.cfg >> /root/.nimby/nim/config/nim.cfg
+RUN nimby sync nimby.lock && \
+  nimby install https://github.com/Metta-AI/bitworld.git
 
 COPY . .
-WORKDIR /workspace/bitworld/stag_hunt/players/rabbiteer
 ARG NimFlags="-d:release -d:useMalloc --opt:speed --stackTrace:on"
 ARG NimCommand="c"
-ARG NimMain="rabbiteer.nim"
+ARG NimMain="players/rabbiteer/rabbiteer.nim"
 RUN nim $NimCommand \
   $NimFlags \
-  --nimcache:/tmp/bitworld-nimcache \
-  --out:rabbiteer \
+  --path:src \
+  --nimcache:/tmp/cogame-nimcache \
+  --out:/bin/rabbiteer \
   $NimMain
 
 # Run Docker.
@@ -50,10 +50,6 @@ RUN apt-get update && \
     libssl3 && \
   rm -rf /var/lib/apt/lists/*
 
-WORKDIR /workspace/bitworld
-COPY --from=build \
-  /workspace/bitworld/stag_hunt/players/rabbiteer/rabbiteer \
-  /bin/rabbiteer
+COPY --from=build /bin/rabbiteer /bin/rabbiteer
 
-WORKDIR /workspace/bitworld/stag_hunt/players/rabbiteer
 CMD ["/bin/rabbiteer", "--address:host.docker.internal", "--port:8080"]

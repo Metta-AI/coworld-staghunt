@@ -25,20 +25,20 @@ https://github.com/treeform/nimby/releases/download/0.1.26/nimby-Linux-ARM64; \
 
 ENV PATH="/root/.nimby/nim/bin:$PATH"
 
-WORKDIR /workspace/bitworld
+WORKDIR /workspace/cogame-staghunt
 COPY nimby.lock .
-RUN nimby --global sync nimby.lock && \
-  cat nim.cfg >> /root/.nimby/nim/config/nim.cfg
+RUN nimby sync nimby.lock && \
+  nimby install https://github.com/Metta-AI/bitworld.git
 
 COPY . .
-WORKDIR /workspace/bitworld/stag_hunt/players/elephant_hunter
 ARG NimFlags="-d:release -d:useMalloc --opt:speed --stackTrace:on"
 ARG NimCommand="c"
-ARG NimMain="elephant_hunter.nim"
+ARG NimMain="players/elephant_hunter/elephant_hunter.nim"
 RUN nim $NimCommand \
   $NimFlags \
-  --nimcache:/tmp/bitworld-nimcache \
-  --out:elephant_hunter \
+  --path:src \
+  --nimcache:/tmp/cogame-nimcache \
+  --out:/bin/elephant_hunter \
   $NimMain
 
 # Run Docker.
@@ -50,10 +50,6 @@ RUN apt-get update && \
     libssl3 && \
   rm -rf /var/lib/apt/lists/*
 
-WORKDIR /workspace/bitworld
-COPY --from=build \
-  /workspace/bitworld/stag_hunt/players/elephant_hunter/elephant_hunter \
-  /bin/elephant_hunter
+COPY --from=build /bin/elephant_hunter /bin/elephant_hunter
 
-WORKDIR /workspace/bitworld/stag_hunt/players/elephant_hunter
 CMD ["/bin/elephant_hunter", "--address:host.docker.internal", "--port:8080"]

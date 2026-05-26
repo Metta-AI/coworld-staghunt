@@ -113,7 +113,7 @@
     "runnable": {
       "type": "game",
       "image": "ghcr.io/malcolmocean/bitworld-stag-hunt:latest",
-      "run": ["/bin/stag_hunt", "--address:0.0.0.0", "--port:8080"]
+      "run": ["/bin/staghunt", "--address:0.0.0.0", "--port:8080"]
     }
   },
   "player": [

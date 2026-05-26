@@ -25,20 +25,23 @@ https://github.com/treeform/nimby/releases/download/0.1.26/nimby-Linux-ARM64; \
 
 ENV PATH="/root/.nimby/nim/bin:$PATH"
 
-WORKDIR /workspace/bitworld
+WORKDIR /workspace/cogame-staghunt
 COPY nimby.lock .
-RUN nimby --global sync nimby.lock && \
-  cat nim.cfg >> /root/.nimby/nim/config/nim.cfg
+RUN nimby sync nimby.lock && \
+  nimby install https://github.com/Metta-AI/bitworld.git
 
 COPY . .
-WORKDIR /workspace/bitworld/stag_hunt
+RUN mkdir -p /workspace/bitworld-assets && \
+  cp -R bitworld/client /workspace/bitworld-assets/client
+
 ARG NimFlags="-d:release -d:useMalloc --opt:speed --stackTrace:on"
 ARG NimCommand="c"
-ARG NimMain="stag_hunt.nim"
+ARG NimMain="src/staghunt.nim"
 RUN nim $NimCommand \
   $NimFlags \
-  --nimcache:/tmp/bitworld-nimcache \
-  --out:stag_hunt \
+  --path:src \
+  --nimcache:/tmp/cogame-nimcache \
+  --out:/bin/staghunt \
   $NimMain
 
 # Run Docker.
@@ -50,16 +53,13 @@ RUN apt-get update && \
     curl && \
   rm -rf /var/lib/apt/lists/*
 
-WORKDIR /workspace/bitworld
-COPY --from=build \
-  /workspace/bitworld/stag_hunt/stag_hunt \
-  /bin/stag_hunt
-COPY --from=build /workspace/bitworld/client/*.html ./client/
-COPY --from=build /workspace/bitworld/client/*.js ./client/
-COPY --from=build /workspace/bitworld/client/data ./client/data
+WORKDIR /workspace/cogame-staghunt
+COPY --from=build /bin/staghunt /bin/staghunt
+COPY --from=build /workspace/bitworld-assets/client ./client
+COPY coworld_manifest.json .
+COPY sprites ./sprites
 
-WORKDIR /workspace/bitworld/stag_hunt
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=2s --start-period=5s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
-CMD ["/bin/stag_hunt", "--address:0.0.0.0", "--port:8080"]
+CMD ["/bin/staghunt", "--address:0.0.0.0", "--port:8080"]
