@@ -138,6 +138,40 @@ proc classifySprite(spriteId: int): SpriteKind =
   if spriteId >= IndicatorSpriteBase and spriteId < IndicatorSpriteBase + 3: return SpriteIndicator
   SpriteUnknown
 
+proc refreshEnergyFromHud(bot: var Bot) =
+  ## Decodes self-energy from the HUD digit sprites the server places at
+  ## y=7 (right of the energy icon) every per-player frame. Browsers
+  ## render those digits as the visible energy readout; we re-decode
+  ## them as an integer, so bots and humans observe the same world
+  ## through the same wire protocol -- no custom packet needed.
+  const
+    EnergyHudY = 7
+    DigitSpriteBase = 30   # sprite ids 30..39 are digits '0'..'9'
+    DigitSpriteMax = 39
+    DigitStride = 4        # DigitSpriteWidth(3) + 1 pixel gap
+    DigitStartX = 5        # first digit lives at (5, 7); icon at (1, 7)
+  var
+    digits: array[6, int]
+    maxIdx = -1
+  for obj in bot.objects:
+    if not obj.present or obj.y != EnergyHudY:
+      continue
+    if obj.spriteId < DigitSpriteBase or obj.spriteId > DigitSpriteMax:
+      continue
+    let idx = (obj.x - DigitStartX) div DigitStride
+    if idx < 0 or idx >= digits.len:
+      continue
+    digits[idx] = obj.spriteId - DigitSpriteBase
+    if idx > maxIdx:
+      maxIdx = idx
+  if maxIdx < 0:
+    return
+  var value = 0
+  for i in 0 .. maxIdx:
+    value = value * 10 + digits[i]
+  bot.energy = value
+  bot.energyKnown = true
+
 proc applySpritePacket(bot: var Bot, packet: string): bool =
   var offset = 0
   while offset < packet.len:
@@ -195,13 +229,9 @@ proc applySpritePacket(bot: var Bot, packet: string): bool =
       if offset + 2 > packet.len: return false
       bot.selfObjectId = packet.readU16(offset)
       offset += 2
-    of 0x08:
-      if offset + 2 > packet.len: return false
-      bot.energy = packet.readU16(offset)
-      bot.energyKnown = true
-      offset += 2
     else:
       return false
+  bot.refreshEnergyFromHud()
   true
 
 proc spriteInfo(bot: Bot, spriteId: int): SpriteInfo =
