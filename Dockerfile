@@ -27,8 +27,7 @@ ENV PATH="/root/.nimby/nim/bin:$PATH"
 
 WORKDIR /workspace/cogame-staghunt
 COPY nimby.lock .
-RUN nimby sync nimby.lock && \
-  nimby install https://github.com/Metta-AI/bitworld.git
+RUN nimby sync nimby.lock
 
 COPY . .
 RUN mkdir -p /workspace/bitworld-assets && \
