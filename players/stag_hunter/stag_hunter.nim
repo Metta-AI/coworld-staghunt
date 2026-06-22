@@ -711,11 +711,13 @@ proc runBot(
   slot = -1
 ) =
   let endpoint = connectUrl(address, url, name, token, port, slot)
+  var connected = false
   while true:
     try:
       echo "stag_hunter connecting to ", endpoint
       var bot = initBot()
       let ws = newWebSocket(endpoint)
+      connected = true
       var lastMask = 0xff'u8
       while true:
         if not ws.receiveUpdates(bot):
@@ -725,6 +727,7 @@ proc runBot(
           ws.send(playerInputBlob(mask), BinaryMessage)
           lastMask = mask
     except CatchableError as e:
+      if connected: break
       echo "stag_hunter reconnecting after error: ", e.msg
       sleep(ConnectRetryDelayMs)
 

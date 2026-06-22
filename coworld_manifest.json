@@ -107,8 +107,12 @@
     },
     "runnable": {
       "type": "game",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt:latest",
-      "run": ["/bin/staghunt", "--address:0.0.0.0", "--port:8080"]
+      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt@sha256:22620861393f11b715f28046b1972405949cab44d8addfbc2bbfad8a4f4098a5",
+      "run": [
+        "/bin/staghunt",
+        "--address:0.0.0.0",
+        "--port:8080"
+      ]
     },
     "protocols": {
       "player": {
@@ -121,6 +125,10 @@
       }
     },
     "docs": {
+      "readme": {
+        "type": "text",
+        "value": "# Stag Hunt\n\nA cooperative grid-hunting game built on BitWorld. Hunters move around a tile world and capture prey by surrounding them. Small prey can be taken alone; larger prey require a coordinated coalition encircling them at the same time — the classic stag-hunt tension between safe solo payoffs and risky-but-rich cooperation.\n\n## Rules\n\nHunters share a 32x32 tile world. Each tick you may move in a cardinal direction. You capture a prey when enough hunters occupy the tiles around it simultaneously.\n\n| Prey | Hunters needed |\n| --- | --- |\n| Rabbit | 1 (solo) |\n| Boar | 2 |\n| Stag | 2 |\n| Moose | 3 |\n| Elephant | 4 |\n\nLarger prey are worth more points and energy, but moose and elephants fight back (gut/trample), draining the energy of poorly-coordinated hunters.\n\n## Scoring\n\nEach capture awards score and energy to every participating hunter. Your result is your cumulative score across all rounds. Shared kills are recorded per player pair, so cooperation is visible in `stats.co_captures`.\n\n## Energy\n\nHunters spend energy to act and gain it from catches. Running out of energy is punishing, so steady rabbit income competes against the high-variance payoff of big coordinated hunts.\n\n## Strategy\n\n- Rabbits are guaranteed solo income and anchor the low-cooperation end of play.\n- Stags and boars need a partner; moose and elephants need 3-4 hunters arriving together.\n- Watch ally positions: a half-formed coalition that mistimes its encirclement just feeds energy to the prey.\n\n## Players\n\nThe manifest bundles eight reference bots spanning the cooperation spectrum, from a pure rabbit specialist to elephant-coordination and adaptive expected-value modelers. During league play the platform substitutes submitted policies for these slots.\n\n## FAQ\n\n**How do I connect a player?** Read `COWORLD_PLAYER_WS_URL` from the environment and speak the sprite_v1 player protocol (see `game.protocols.player`).\n\n**When does my player exit?** When the episode ends and the game closes the connection, exit cleanly with status 0.\n"
+      },
       "pages": [
         {
           "id": "rules.md",
@@ -147,94 +155,96 @@
       "name": "Big Game Hunter",
       "type": "player",
       "description": "Counts nearby allies, derives which prey kinds are catchable at that coalition size, and picks the highest-reward catchable prey.",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-big-game-hunter:latest",
-      "run": ["/bin/big_game_hunter", "--address:host.docker.internal", "--port:8080"]
+      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-big-game-hunter@sha256:f3b0cdb74fca1ea50f761bb8190450bd699c57d6f6905cf0f0f33550eb0263fd",
+      "run": [
+        "/bin/big_game_hunter",
+        "--address:host.docker.internal",
+        "--port:8080"
+      ]
     },
     {
       "id": "nearest-hunter",
       "name": "Nearest Hunter",
       "type": "player",
       "description": "Greedy bot that always chases the closest reachable prey using A* pathfinding.",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-nearest-hunter:latest",
-      "run": ["/bin/nearest-hunter"]
+      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-nearest-hunter@sha256:1222f5eed6a83bdae27db4e463a2bf15a9b8ea3bfc41dd501faa9c7e2106fae7",
+      "run": [
+        "/bin/nearest_hunter",
+        "--address:host.docker.internal",
+        "--port:8080"
+      ]
     },
     {
       "id": "rabbiteer",
       "name": "Rabbiteer",
       "type": "player",
       "description": "Specialist bot that prioritizes rabbits for guaranteed solo kills and consistent energy income.",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-rabbiteer:latest",
-      "run": ["/bin/rabbiteer", "--address:host.docker.internal", "--port:8080"]
+      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-rabbiteer@sha256:332a24c5249afd632a42b50bc61dbc10837db2035863daae7bc7e171f0b33fbd",
+      "run": [
+        "/bin/rabbiteer",
+        "--address:host.docker.internal",
+        "--port:8080"
+      ]
     },
     {
       "id": "sidekick",
       "name": "Sidekick",
       "type": "player",
       "description": "Cooperative bot that follows nearby allies and assists with encirclement of larger prey.",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-sidekick:latest",
-      "run": ["/bin/sidekick", "--address:host.docker.internal", "--port:8080"]
+      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-sidekick@sha256:b373904b9e522021a0f5f8d666ddd5641d2877d0c17b4e942fe5780ffce3a88c",
+      "run": [
+        "/bin/sidekick",
+        "--address:host.docker.internal",
+        "--port:8080"
+      ]
     },
     {
       "id": "stag-hunter",
       "name": "Stag Hunter",
       "type": "player",
       "description": "Mid-tier specialist that targets stags and boars, balancing reward size against required coordination.",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-stag-hunter:latest",
-      "run": ["/bin/stag-hunter"]
+      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-stag-hunter@sha256:2bc0a5f51f45053ac420d4467fe8cfd8bb5104b2cf5d70b4a34c1f9db40733d4",
+      "run": [
+        "/bin/stag_hunter",
+        "--address:host.docker.internal",
+        "--port:8080"
+      ]
     },
     {
       "id": "moose-hunter",
       "name": "Moose Hunter",
       "type": "player",
       "description": "Specialist bot that targets moose, using rank-based side assignment to coordinate three hunters approaching from different cardinal directions.",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-moose-hunter:latest",
-      "run": ["/bin/moose_hunter", "--address:host.docker.internal", "--port:8080"]
+      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-moose-hunter@sha256:fe49c2ff25fb76a78a9290516d90f84c0b05213dbf273d5ef64d6162bfe40cec",
+      "run": [
+        "/bin/moose_hunter",
+        "--address:host.docker.internal",
+        "--port:8080"
+      ]
     },
     {
       "id": "elephant-hunter",
       "name": "Elephant Hunter",
       "type": "player",
       "description": "Specialist bot that targets elephants exclusively, using rank-based side assignment to coordinate four hunters into a simultaneous encirclement.",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-elephant-hunter:latest",
-      "run": ["/bin/elephant_hunter", "--address:host.docker.internal", "--port:8080"]
+      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-elephant-hunter@sha256:1c0807337710d6b93ca3f7858a1887c5df9dc6dfa3f5b4ddc4e4465642e264ce",
+      "run": [
+        "/bin/elephant_hunter",
+        "--address:host.docker.internal",
+        "--port:8080"
+      ]
     },
     {
       "id": "modeler",
       "name": "Modeler",
       "type": "player",
       "description": "Adaptive bot that scores all prey types by reward, distance, and learned ally cooperation probability, dynamically choosing the highest-expected-value target.",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-modeler:latest",
-      "run": ["/bin/modeler", "--address:host.docker.internal", "--port:8080"]
-    }
-  ],
-  "reporter": [
-    {
-      "id": "stag-hunt-commentator",
-      "type": "reporter",
-      "name": "Stag Hunt Commentator",
-      "description": "Sports-commentator / newspaper write-up of an episode. Computes reward-agnostic facts (actual scores, prey breakdown, who teamed with whom, lead changes) and narrates them with Claude via AWS Bedrock, falling back to a deterministic templated recap when Bedrock is unavailable.",
-      "source_url": "https://github.com/Metta-AI/cogame-staghunt/tree/main/tools/staghunt_tools",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-tools:latest",
-      "run": ["python", "-m", "staghunt_tools.reporter"]
-    }
-  ],
-  "grader": [
-    {
-      "id": "stag-hunt-collab-grader",
-      "type": "grader",
-      "name": "Stag Hunt Collaboration Grader",
-      "description": "Reward-agnostic scalar score (0-1) for how interesting an episode was w.r.t. multi-agent collaboration: cooperation depth and breadth from the co-capture structure, competitive balance from actual scores, and prey diversity. Does not hardcode prey point values or coalition sizes, so it survives server-side rebalancing.",
-      "source_url": "https://github.com/Metta-AI/cogame-staghunt/tree/main/tools/staghunt_tools",
-      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-tools:latest",
-      "run": ["python", "-m", "staghunt_tools.grader"]
-    },
-    {
-      "id": "bitworld-score-grader",
-      "name": "BitWorld Score Grader",
-      "type": "grader",
-      "description": "Generic BitWorld grader that scores episode interest from score spread and game-specific activity signals.",
-      "source_url": "https://github.com/Metta-AI/graders/tree/main/graders/bitworld_score/bitworld_score_grader",
-      "image": "ghcr.io/metta-ai/graders-bitworld-score:latest"
+      "image": "ghcr.io/malcolmocean/bitworld-stag-hunt-modeler@sha256:25532d6270e0e6f14336f6f2b89198c543c3cb7941081d2706fbc6a3c82f51ab",
+      "run": [
+        "/bin/modeler",
+        "--address:host.docker.internal",
+        "--port:8080"
+      ]
     }
   ],
   "variants": [

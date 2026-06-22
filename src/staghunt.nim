@@ -1,6 +1,7 @@
 import mummy
 import pixie
 import supersnappy
+import zippy
 import bitworld/client
 import bitworld/cogame_runtime
 import bitworld/protocol, bitworld/server
@@ -2149,6 +2150,78 @@ proc runFrameLimiter(previousTick: var MonoTime) =
     sleep(int((frameDuration - elapsed).inMilliseconds))
   previousTick = getMonoTime()
 
+# --- Coworld replay -------------------------------------------------------
+# We record the same sprite_v1 "global" frames the live /global viewer would
+# receive, so the standard global client (which Coworld maps /client/replay to)
+# renders the replay unchanged. Frames are length-prefixed: LE uint32 length +
+# bytes, concatenated. The runner zlib-compresses the saved blob before handing
+# it back via COGAME_LOAD_REPLAY_URI, so load-mode decompresses first.
+
+proc serializeReplay(frames: seq[seq[uint8]]): string =
+  for f in frames:
+    let n = f.len.uint32
+    result.add char(n and 0xff'u32)
+    result.add char((n shr 8) and 0xff'u32)
+    result.add char((n shr 16) and 0xff'u32)
+    result.add char((n shr 24) and 0xff'u32)
+    for b in f:
+      result.add char(b)
+
+proc parseReplay(blob: string): seq[seq[uint8]] =
+  var i = 0
+  while i + 4 <= blob.len:
+    let n = blob[i].uint8.uint32 or (blob[i + 1].uint8.uint32 shl 8) or
+            (blob[i + 2].uint8.uint32 shl 16) or (blob[i + 3].uint8.uint32 shl 24)
+    i += 4
+    if i + n.int > blob.len:
+      break
+    var frame = newSeq[uint8](n.int)
+    for k in 0 ..< n.int:
+      frame[k] = blob[i + k].uint8
+    result.add frame
+    i += n.int
+
+var replayFramesGlobal: seq[seq[uint8]]
+
+proc replayHttpHandler(request: Request) =
+  if request.serveHealthz():
+    discard
+  elif request.path == "/replay" and request.httpMethod == "GET" and
+      request.isWebSocketUpgrade():
+    discard request.upgradeToWebSocket()
+  elif request.path == CoworldReplayClientRoute and request.httpMethod == "GET":
+    discard request.serveClientFile(CoworldReplayClientRoute)
+  elif request.path.isStaticRoute():
+    discard request.serveClientFile(request.path)
+  else:
+    var headers: HttpHeaders
+    headers["Content-Type"] = "text/plain"
+    request.respond(200, headers, "Stag Hunt replay server")
+
+proc replayWebsocketHandler(
+  websocket: WebSocket,
+  event: WebSocketEvent,
+  message: Message
+) =
+  if event == OpenEvent:
+    {.gcsafe.}:
+      for frame in replayFramesGlobal:
+        try:
+          websocket.send(blobFromBytes(frame), BinaryMessage)
+        except CatchableError:
+          break
+
+proc runReplayServer(host: string, port: int, replayBlob: string) =
+  replayFramesGlobal = parseReplay(replayBlob)
+  echo "replay mode: ", replayFramesGlobal.len, " frames loaded"
+  let server = newServer(
+    replayHttpHandler,
+    replayWebsocketHandler,
+    workerThreads = 2,
+    tcpNoDelay = true
+  )
+  server.serve(Port(port), host)
+
 proc resetRound(sim: var SimServer, config: GameConfig, gamesPlayed: int) =
   sim.prey = @[]
   sim.corpses = @[]
@@ -2261,6 +2334,8 @@ proc runServerLoop(
     roundEndTick = 0
     gamesPlayed = 0
     roundScores: seq[seq[int]] = @[]
+    replayFrames: seq[seq[uint8]] = @[]
+    recorderState = ViewerState()
   sim.focusElephant = config.focusElephant
 
   while true:
@@ -2354,6 +2429,17 @@ proc runServerLoop(
             writeFile(saveScoresPath, sim.playerResultsJson(roundScores) & "\n")
             echo "results written to: ", saveScoresPath
           logEvent(sim.tickCount, "tournament_end", %*{"games": gamesPlayed})
+          block:
+            let saveReplayUri = getEnv(CogameSaveReplayUriEnv)
+            if saveReplayUri.len > 0:
+              writeCogameUri(
+                saveReplayUri,
+                serializeReplay(replayFrames),
+                "application/octet-stream",
+                "replay",
+                cogameHttpMethod(CogameSaveReplayMethodEnv)
+              )
+              echo "replay written to: ", saveReplayUri, " (", replayFrames.len, " frames)"
           closeEventLog()
           httpServer.close()
           joinThread(serverThread)
@@ -2404,6 +2490,14 @@ proc runServerLoop(
           withLock appState.lock:
             sim.removePlayer(globalSockets[i])
 
+    block:
+      # Record this tick's global frame for the Coworld replay, independent of
+      # whether any live global viewer is connected (during an episode none is).
+      var nextRec: ViewerState
+      let recBytes = sim.buildGlobalFrame(recorderState, nextRec)
+      replayFrames.add(recBytes)
+      recorderState = nextRec
+
     runFrameLimiter(lastTick)
 
 when isMainModule:
@@ -2424,6 +2518,16 @@ when isMainModule:
       of "event-log": eventLogPath = val
       else: discard
     else: discard
+
+  # Coworld replay mode: when COGAME_LOAD_REPLAY_URI is set, don't run a game —
+  # serve the recorded frames for /client/replay + the /replay WebSocket. The
+  # runner hands back a zlib-compressed blob, so decompress before parsing.
+  let loadReplayPath = pathFromCogameEnv(CogameLoadReplayUriEnv)
+  if loadReplayPath.len > 0:
+    echo "replay mode: loading ", loadReplayPath
+    runReplayServer(address, port, zippy.uncompress(readFile(loadReplayPath)))
+    quit(0)
+
   var config = defaultGameConfig()
   if configPath.len > 0:
     echo "loading config from: ", configPath
